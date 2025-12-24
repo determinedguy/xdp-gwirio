@@ -6,7 +6,8 @@
 #include <unistd.h>
 #include <linux/if_link.h>
 #include <linux/bpf.h>
-#include <bpf/libbpf.h>
+#include <bpf/bpf.h>      // Low-level BPF wrappers
+#include <bpf/libbpf.h>   // High-level BPF helpers
 
 /* * Minimal BPF instructions for "return XDP_PASS"
  * essentially: mov r0, 2; exit;
@@ -17,24 +18,31 @@ struct bpf_insn prog_insns[] = {
 };
 
 /*
- * Loads the dummy XDP program into the kernel.
+ * Loads the dummy XDP program into the kernel using modern libbpf API.
  * Returns the file descriptor (fd) of the loaded program.
  */
 int load_dummy_prog() {
-    // We use the low-level API to avoid needing an external .o file
-    struct bpf_load_program_attr load_attr = {
-        .prog_type = BPF_PROG_TYPE_XDP,
-        .expected_attach_type = BPF_XDP,
-        .insns = prog_insns,
-        .insn_cnt = sizeof(prog_insns) / sizeof(struct bpf_insn),
-        .license = "GPL",
+    char log_buf[65535];
+    
+    // Modern way to define load options
+    struct bpf_prog_load_opts opts = {
+        .sz = sizeof(struct bpf_prog_load_opts), // Version checking
+        .log_buf = log_buf,
+        .log_size = sizeof(log_buf),
+        .log_level = 1,
     };
 
-    char log_buf[65535];
-    int fd = bpf_load_program_xattr(&load_attr, log_buf, sizeof(log_buf));
+    // New API: bpf_prog_load(type, name, license, insns, insn_cnt, opts)
+    int fd = bpf_prog_load(BPF_PROG_TYPE_XDP, 
+                           "xdp_test_prog", 
+                           "GPL", 
+                           prog_insns, 
+                           sizeof(prog_insns) / sizeof(struct bpf_insn), 
+                           &opts);
     
     if (fd < 0) {
         fprintf(stderr, "Failed to load BPF program: %s\n", log_buf);
+        return -1;
     }
     return fd;
 }
@@ -44,6 +52,7 @@ int load_dummy_prog() {
  */
 void probe_mode(int ifindex, int prog_fd, const char *mode_name, int flags) {
     printf("Testing %-10s... ", mode_name);
+    fflush(stdout);
 
     // Try to attach
     int err = bpf_xdp_attach(ifindex, prog_fd, flags, NULL);
@@ -88,7 +97,7 @@ int main(int argc, char **argv) {
     // 2. Test Offload Mode (Hardware)
     probe_mode(ifindex, prog_fd, "OFFLOAD", XDP_FLAGS_HW_MODE);
 
-    // 3. Test Generic Mode (SKB) - Almost always supported on 4.12+
+    // 3. Test Generic Mode (SKB)
     probe_mode(ifindex, prog_fd, "GENERIC", XDP_FLAGS_SKB_MODE);
 
     close(prog_fd);
