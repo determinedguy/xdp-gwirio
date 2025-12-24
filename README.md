@@ -17,7 +17,7 @@ You will need the BPF development libraries installed:
 
 ## Compile and Run
 
-To compile, simply run `Make`.
+To compile, simply run `make`.
 
 To run, run `sudo ./xdp_test <your_interface_name>`.
 
